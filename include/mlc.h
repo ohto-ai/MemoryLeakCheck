@@ -54,6 +54,13 @@ namespace ohtoai {
                 void deallocate(pointer p, size_t n) noexcept {
                     std::free(p);
                 }
+
+                bool operator==(const UnhandledAllocator&) const noexcept {
+                    return true;
+                }
+                bool operator!=(const UnhandledAllocator&) const noexcept {
+                    return false;
+                }
             };
 
             class ScopeMemoryLeakCheck {
@@ -118,7 +125,6 @@ namespace ohtoai {
                         }
                     }
                     memoryInChecker = set;
-                    
                     if (callback) {
                         callback(this, tempRecords);
                     }
