@@ -4,6 +4,7 @@
 #define _OHTOAI_MEMORY_LEAK_CHECK_HH_
 
 #include <new>
+#include <set>
 #include <stack>
 #include <memory>
 #include <functional>
@@ -59,64 +60,80 @@ namespace ohtoai {
             private:
                 friend void* ::operator new(size_t size);
                 friend void ::operator delete(void* p) noexcept;
-                void* allocate(size_t size) {
-                    void* p = malloc(size);
+                using handle_t = void*;
+                handle_t allocate(size_t size) {
+                    handle_t p = std::malloc(size);
                     if (p == nullptr) {
                         throw std::bad_alloc();
                     }
+                    memoryInChecker.insert(p);
                     memoryRecords[p] = size;
                     return p;
                 }
-                void deallocate(void* p) noexcept {
+                void deallocate(handle_t p) noexcept {
                     free(p);
+                    memoryInChecker.erase(p);
                     memoryRecords.erase(p);
                 }
+                mutable std::set<handle_t, std::less<handle_t>, UnhandledAllocator<handle_t>> memoryInChecker;
             private:
+                inline thread_local static UnhandledAllocator<ScopeMemoryLeakCheck> allocator;
                 inline thread_local static std::stack<std::weak_ptr<ScopeMemoryLeakCheck>,
                     std::deque<std::weak_ptr<ScopeMemoryLeakCheck>,
-                    UnhandledAllocator<std::weak_ptr<ScopeMemoryLeakCheck>>>> records;
-                std::unordered_map<void*, size_t, std::hash<void*>, std::equal_to<void*>, UnhandledAllocator<std::pair<void* const, size_t>>> memoryRecords;
-                inline thread_local static UnhandledAllocator<ScopeMemoryLeakCheck> allocator;
+                    UnhandledAllocator<std::weak_ptr<ScopeMemoryLeakCheck>>>>
+                    checkerRecords;
+                inline thread_local static std::unordered_map<handle_t, size_t, std::hash<handle_t>,
+                    std::equal_to<handle_t>, UnhandledAllocator<std::pair<const handle_t, size_t>>>
+                    memoryRecords;
             public:
                 static std::shared_ptr<ScopeMemoryLeakCheck> issueRecord() {
                     auto ptr = std::allocate_shared<ScopeMemoryLeakCheck>(allocator);
-                    records.push(ptr);
+                    checkerRecords.push(ptr);
                     return ptr;
                 }
 
                 static std::shared_ptr<ScopeMemoryLeakCheck> currentRecord() {
-                    while (!records.empty()) {
-                        if (auto ptr = records.top().lock()) {
+                    while (!checkerRecords.empty()) {
+                        if (auto ptr = checkerRecords.top().lock()) {
                             return ptr;
                         }
                         else {
-                            records.pop();
+                            checkerRecords.pop();
                         }
                     }
                     return {};
                 }
                 bool checkMemoryLeak(std::function<void(const decltype(memoryRecords)&)> callback = {}) const {
-                    if (callback) {
-                        callback(memoryRecords);
-                    }
-                    return memoryRecords.empty();
+                    return checkMemoryLeak([callback](const ScopeMemoryLeakCheck*, const decltype(memoryRecords)& map) {
+                        return callback(map);
+                        });
                 }
                 bool checkMemoryLeak(std::function<void(const ScopeMemoryLeakCheck*, const decltype(memoryRecords)&)> callback = {}) const {
-                    if (callback) {
-                        callback(this, memoryRecords);
+                    decltype(memoryInChecker) set{};
+                    decltype(memoryRecords) tempRecords{};
+                    for (const auto m : memoryInChecker) {
+                        if (memoryRecords.find(m) != memoryRecords.end()) {
+                            set.insert(m);
+                            tempRecords[m] = memoryRecords.at(m);
+                        }
                     }
-                    return memoryRecords.empty();
+                    memoryInChecker = set;
+                    
+                    if (callback) {
+                        callback(this, tempRecords);
+                    }
+                    return tempRecords.empty();
                 }
 
                 ~ScopeMemoryLeakCheck() {
-                    while (!records.empty() && records.top().expired()) {
-                        records.pop();
+                    while (!checkerRecords.empty() && checkerRecords.top().expired()) {
+                        checkerRecords.pop();
                     }
-                    if (!records.empty()) {
-                        auto record = records.top().lock();
+                    if (!checkerRecords.empty()) {
+                        auto record = checkerRecords.top().lock();
                         if (!record)
                             return;
-                        record->memoryRecords.insert(memoryRecords.begin(), memoryRecords.end());
+                        record->memoryInChecker.insert(memoryInChecker.begin(), memoryInChecker.end());
                     }
                 }
             };
