@@ -1,14 +1,21 @@
-﻿cmake_minimum_required (VERSION 3.8)
+﻿cmake_minimum_required (VERSION 3.12)
 
-if (POLICY CMP0141)
-  cmake_policy(SET CMP0141 NEW)
-  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+project (mlc)
+
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(MEMORY_LEAK_CHECK_IS_MAIN_PROJECT TRUE)
+else()
+    set(MEMORY_LEAK_CHECK_IS_MAIN_PROJECT FALSE)
 endif()
 
-project ("MemoryLeakCheck")
+add_library(${PROJECT_NAME} INTERFACE)
+add_library(mlc::mlc ALIAS ${PROJECT_NAME})
+target_include_directories(${PROJECT_NAME} INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_17)
 
-add_executable (MemoryLeakCheck "main.cpp")
-
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET MemoryLeakCheck PROPERTY CXX_STANDARD 17)
+if(MEMORY_LEAK_CHECK_IS_MAIN_PROJECT)
+  add_executable (${PROJECT_NAME}_demo "test/main.cpp")
+  target_link_libraries(${PROJECT_NAME}_demo PRIVATE mlc::mlc)
 endif()

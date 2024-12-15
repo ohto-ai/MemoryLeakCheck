@@ -10,7 +10,7 @@
 #include <unordered_map>
 
 namespace ohtoai {
-    namespace memory_leak_check {
+    namespace mlc {
         namespace detail {
             template <typename T>
             struct UnhandledAllocator {
@@ -95,11 +95,29 @@ namespace ohtoai {
                     }
                     return {};
                 }
-                bool checkMemoryLeak(std::function<void(const decltype(memoryRecords)&)> callback = {}) {
+                bool checkMemoryLeak(std::function<void(const decltype(memoryRecords)&)> callback = {}) const {
                     if (callback) {
                         callback(memoryRecords);
                     }
                     return memoryRecords.empty();
+                }
+                bool checkMemoryLeak(std::function<void(const ScopeMemoryLeakCheck*, const decltype(memoryRecords)&)> callback = {}) const {
+                    if (callback) {
+                        callback(this, memoryRecords);
+                    }
+                    return memoryRecords.empty();
+                }
+
+                ~ScopeMemoryLeakCheck() {
+                    while (!records.empty() && records.top().expired()) {
+                        records.pop();
+                    }
+                    if (!records.empty()) {
+                        auto record = records.top().lock();
+                        if (!record)
+                            return;
+                        record->memoryRecords.insert(memoryRecords.begin(), memoryRecords.end());
+                    }
                 }
             };
         }
@@ -108,20 +126,20 @@ namespace ohtoai {
 }
 
 void* operator new(size_t size) {
-    if (auto record = ohtoai::memory_leak_check::ScopeMemoryLeakCheck::currentRecord()) {
+    if (auto record = ohtoai::mlc::ScopeMemoryLeakCheck::currentRecord()) {
         return record->allocate(size);
     }
     else {
-        return ohtoai::memory_leak_check::detail::UnhandledAllocator<std::uint8_t>().allocate(size);
+        return ohtoai::mlc::detail::UnhandledAllocator<std::uint8_t>().allocate(size);
     }
 }
 
 void operator delete(void* p) noexcept {
-    if (auto record = ohtoai::memory_leak_check::ScopeMemoryLeakCheck::currentRecord()) {
+    if (auto record = ohtoai::mlc::ScopeMemoryLeakCheck::currentRecord()) {
         return record->deallocate(p);
     }
     else {
-        return ohtoai::memory_leak_check::detail::UnhandledAllocator<std::uint8_t>().deallocate(static_cast<std::uint8_t*>(p), 1);
+        return ohtoai::mlc::detail::UnhandledAllocator<std::uint8_t>().deallocate(static_cast<std::uint8_t*>(p), 1);
     }
 }
 
