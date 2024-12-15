@@ -1,4 +1,4 @@
-# MemoryLeakCheck
+# Memory Leak Check
 
 ## Usage
 ```cmake
